@@ -5,9 +5,10 @@ pub use results::*;
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::fmt;
+use std::fs;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::ptr::{NonNull, null};
+use std::ptr::{NonNull, null, null_mut};
 
 use results::slice;
 
@@ -15,6 +16,7 @@ use results::slice;
 pub enum Error {
     Failed,
     Import(String),
+    Container(String),
     InteriorNul,
 }
 
@@ -23,6 +25,7 @@ impl fmt::Display for Error {
         match self {
             Error::Failed => f.write_str("hoshidicts call failed"),
             Error::Import(e) => write!(f, "import failed: {e}"),
+            Error::Container(e) => write!(f, "container operation failed: {e}"),
             Error::InteriorNul => f.write_str("string contains an interior nul byte"),
         }
     }
@@ -85,6 +88,62 @@ pub fn import(
 
     unsafe { ffi::hd_import_result_free(r) };
     result
+}
+
+unsafe fn take_string(ptr: *mut c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    let value = unsafe { string(ptr) };
+    unsafe { ffi::hd_container_string_free(ptr) };
+    Some(value)
+}
+
+unsafe fn take_error(ptr: *mut c_char) -> Error {
+    unsafe { take_string(ptr) }.map_or(Error::Failed, Error::Container)
+}
+
+pub fn pack(dictionary_dir: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<u64, Error> {
+    let dictionary_dir = cpath(dictionary_dir.as_ref())?;
+    let output = output.as_ref();
+    let output_path = cpath(output)?;
+
+    let mut error = null_mut();
+    if unsafe { ffi::hd_container_pack(dictionary_dir.as_ptr(), output_path.as_ptr(), &mut error) }
+        != 0
+    {
+        return Err(unsafe { take_error(error) });
+    }
+
+    fs::metadata(output)
+        .map(|m| m.len())
+        .map_err(|_| Error::Failed)
+}
+
+pub fn verify(container: impl AsRef<Path>) -> Result<u32, Error> {
+    let container = cpath(container.as_ref())?;
+
+    let mut payload_version = 0;
+    let mut error = null_mut();
+    if unsafe { ffi::hd_container_verify(container.as_ptr(), &mut payload_version, &mut error) }
+        != 0
+    {
+        return Err(unsafe { take_error(error) });
+    }
+
+    Ok(payload_version)
+}
+
+pub fn index(container: impl AsRef<Path>) -> Result<String, Error> {
+    let container = cpath(container.as_ref())?;
+
+    let mut json = null_mut();
+    let mut error = null_mut();
+    if unsafe { ffi::hd_container_index(container.as_ptr(), &mut json, &mut error) } != 0 {
+        return Err(unsafe { take_error(error) });
+    }
+
+    unsafe { take_string(json) }.ok_or(Error::Failed)
 }
 
 unsafe impl Send for Deinflector {}

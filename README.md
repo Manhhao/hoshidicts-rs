@@ -42,6 +42,29 @@ for result in results.results() {
 `run` keeps its default-options behavior; `run_with_options` adds the
 frequency-ordering and primary-reading controls.
 
+## Containers
+
+A `.hoshi` container packs an imported dictionary directory into one file that
+the engine can query directly, without unpacking it first.
+
+```rust
+use hoshidicts::{index, pack, verify, Query};
+
+let bytes = pack("jitendex", "jitendex.hoshi")?;
+let payload_version = verify("jitendex.hoshi")?;
+let summary = index("jitendex.hoshi")?;
+
+let mut query = Query::new();
+query.add_term_dict("jitendex.hoshi")?;
+```
+
+`pack` writes the container, verifies it before moving it into place, and
+returns its size in bytes. `verify` checks every section against its checksum
+and returns the payload version. `index` returns the summary an import wrote as
+JSON — the title, revision and entry counts — enough to identify a container and
+tell a term dictionary from a kanji or IPA one without loading it. `add_term_dict`
+and its siblings take either a directory or a container path.
+
 ## Threading
 
 `Query`, `Deinflector`, `Lookup`, and `OwnedLookup` are `Send` but not `Sync`:
